@@ -1,0 +1,379 @@
+{
+  "name": "LeadSpark — WhatsApp qualify (Webhook version)",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Works without n8n WhatsApp nodes. Uses Webhook + Meta Graph HTTP. LeadSpark."
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "note-start",
+      "name": "START HERE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-700, -240],
+      "parameters": {
+        "width": 420,
+        "height": 420,
+        "color": 4,
+        "content": "## LeadSpark (Webhook version)\nUse this if WhatsApp Trigger says \"Install this node\".\n\n1. Open **Client config** → set agent email\n2. Create credentials: Google Sheets, Gemini Header Auth, Gmail, Header Auth for Meta token\n3. Paste Sheet ID on both Sheet nodes (tab must be named **Leads**)\n4. Paste Phone number ID in **Send WhatsApp HTTP** URL\n5. **Activate** workflow\n6. Copy Webhook **Production URL**\n7. Meta → WhatsApp → Configuration:\n   - Callback URL = Production URL\n   - Verify token = `leadspark-verify` (must match Verify node)\n   - Subscribe **messages**\n8. Message Meta test number from your allowlisted phone"
+      }
+    },
+    {
+      "id": "webhook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-280, 120],
+      "webhookId": "leadspark-wa-webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leadspark-whatsapp",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "webhook-get",
+      "name": "WhatsApp Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-280, -80],
+      "webhookId": "leadspark-wa-verify",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "leadspark-whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "verify-check",
+      "name": "Check verify token",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-40, -80],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.query['hub.mode'] }}",
+              "rightValue": "subscribe",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "v2",
+              "leftValue": "={{ $json.query['hub.verify_token'] }}",
+              "rightValue": "leadspark-verify",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "verify-ok",
+      "name": "Respond challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [220, -160],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "verify-fail",
+      "name": "Respond forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [220, 0],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Forbidden",
+        "options": {
+          "responseCode": 403
+        }
+      }
+    },
+    {
+      "id": "extract",
+      "name": "Extract inbound",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 240],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\n\n// n8n Webhook can nest Meta payload in .body or put it at top level\nconst body = raw.body ?? raw;\nconst root = typeof body === 'string' ? JSON.parse(body) : body;\nconst value = root.entry?.[0]?.changes?.[0]?.value ?? root;\n\n// Ignore delivery/read receipts quietly\nif (value?.statuses && !value?.messages) {\n  return [];\n}\n\nconst messages = value?.messages;\nconst msg = Array.isArray(messages) ? messages[0] : messages;\nif (!msg) {\n  throw new Error('Webhook reached n8n but no WhatsApp text message found. Top keys: ' + Object.keys(raw || {}).join(', '));\n}\n\nconst type = msg.type || (msg.text ? 'text' : '');\nif (type && type !== 'text') {\n  return [];\n}\n\nconst text = (msg.text?.body || (typeof msg.text === 'string' ? msg.text : '') || '').toString().trim();\nif (!text) return [];\n\nconst phone = String(msg.from || '').replace(/\\D/g, '');\nif (!phone) return [];\n\nreturn [{\n  json: {\n    phone,\n    text,\n    wa_name: value.contacts?.[0]?.profile?.name || '',\n    phone_number_id: value.metadata?.phone_number_id || '',\n    message_id: msg.id || '',\n  },\n}];"
+      }
+    },
+    {
+      "id": "config",
+      "name": "Client config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 240],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "agent_name", "value": "Rahul Sharma", "type": "string" },
+            { "id": "a2", "name": "agent_company", "value": "Sharma Properties", "type": "string" },
+            { "id": "a3", "name": "agent_email", "value": "YOUR_EMAIL@gmail.com", "type": "string" },
+            { "id": "a4", "name": "property_title", "value": "3 BHK Premium Apartment in Whitefield", "type": "string" },
+            { "id": "a5", "name": "property_locality", "value": "Whitefield", "type": "string" },
+            { "id": "a6", "name": "property_city", "value": "Bengaluru", "type": "string" },
+            { "id": "a7", "name": "property_bhk", "value": 3, "type": "number" },
+            { "id": "a8", "name": "property_price_inr", "value": 12500000, "type": "number" },
+            { "id": "a9", "name": "property_furnishing", "value": "Semi-furnished", "type": "string" },
+            { "id": "a10", "name": "rera_number", "value": "PRM/KA/RERA/1251/446/PR/171015/000123", "type": "string" }
+          ]
+        },
+        "options": { "includeOtherFields": true }
+      }
+    },
+    {
+      "id": "get-lead",
+      "name": "Get lead row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [700, 240],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "PASTE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Leads", "mode": "name" },
+        "filtersUI": {
+          "values": [{ "lookupColumn": "phone", "lookupValue": "={{ $('Extract inbound').first().json.phone }}" }]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "prepare",
+      "name": "Prepare Gemini payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 240],
+      "parameters": {
+        "jsCode": "const cfg = $('Client config').first().json;\nconst inbound = $('Extract inbound').first().json;\nconst row = $input.first().json || {};\n\nconst hasRow = Boolean(row.phone);\nconst fields = {\n  name: hasRow ? (row.name || '') : '',\n  budget_min: hasRow && row.budget_min !== '' && row.budget_min != null ? Number(row.budget_min) : null,\n  budget_max: hasRow && row.budget_max !== '' && row.budget_max != null ? Number(row.budget_max) : null,\n  locality: hasRow ? (row.locality || '') : '',\n  timeline: hasRow ? (row.timeline || '') : '',\n  purpose: hasRow && row.purpose ? row.purpose : 'unknown',\n  bhk: hasRow ? (row.bhk || '') : '',\n  notes: hasRow ? (row.notes || '') : '',\n  lead_score: hasRow ? (row.lead_score || 'cold') : 'cold',\n  notified: hasRow ? (row.notified || '') : '',\n  transcript: [],\n};\n\ntry {\n  if (hasRow && row.transcript) fields.transcript = JSON.parse(row.transcript);\n} catch (e) {\n  fields.transcript = [];\n}\n\nfields.transcript.push({ role: 'user', content: inbound.text, at: new Date().toISOString() });\n\nconst priceLakh = Math.round(cfg.property_price_inr / 100000);\nconst history = fields.transcript.slice(-12).map((m) => `${m.role === 'user' ? 'Buyer' : 'LeadSpark'}: ${m.content}`).join('\\n');\n\nconst system_prompt = `You are LeadSpark, a WhatsApp assistant for ${cfg.agent_name} at ${cfg.agent_company} (Indian real estate). You represent the agent's listing.\\n\\nPROPERTY\\n- ${cfg.property_title}\\n- ${cfg.property_bhk} BHK, ${cfg.property_furnishing}, ${cfg.property_locality}, ${cfg.property_city}\\n- Price: ₹${priceLakh} Lakh (${cfg.property_price_inr} INR)\\n- RERA: ${cfg.rera_number}\\n\\nGOAL: Over 3–5 short WhatsApp messages, capture name, budget, locality preference, timeline, purpose (self-use/investment), BHK preference. Phone is already ${inbound.phone}.\\n\\nTONE: Warm Indian English. Use BHK and ₹/Lakh/Cr. One question at a time. 2–4 sentences max.\\n\\nALREADY KNOWN:\\n${JSON.stringify({ name: fields.name, budget_max: fields.budget_max, locality: fields.locality, timeline: fields.timeline, purpose: fields.purpose, bhk: fields.bhk }, null, 2)}\\n\\nReturn ONLY JSON with keys: reply, name, budget_min, budget_max, locality, timeline, purpose, bhk, notes.`;\n\nconst user_prompt = `Conversation so far:\\n${history || '(new chat)'}\\n\\nLatest buyer message: ${inbound.text}`;\n\nreturn [{ json: { ...inbound, ...cfg, prior: fields, gemini_body: { system_instruction: { parts: [{ text: system_prompt }] }, contents: [{ role: 'user', parts: [{ text: user_prompt }] }], generationConfig: { temperature: 0.4, responseMimeType: 'application/json' } } } }];"
+      }
+    },
+    {
+      "id": "gemini",
+      "name": "Call Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 240],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.gemini_body }}",
+        "options": { "timeout": 25000 }
+      }
+    },
+    {
+      "id": "parse",
+      "name": "Parse and score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, 240],
+      "parameters": {
+        "jsCode": "const prep = $('Prepare Gemini payload').first().json;\nconst inbound = $('Extract inbound').first().json;\nconst cfg = $('Client config').first().json;\nconst prior = prep.prior;\nconst gemini = $input.first().json;\n\nfunction parseBudget(text) {\n  const t = String(text || '').toLowerCase();\n  const cr = t.match(/(\\d+(?:\\.\\d+)?)\\s*cr/);\n  const lakh = t.match(/(\\d+(?:\\.\\d+)?)\\s*lakh/);\n  if (cr) return Math.round(parseFloat(cr[1]) * 10000000);\n  if (lakh) return Math.round(parseFloat(lakh[1]) * 100000);\n  return null;\n}\n\nfunction score(f) {\n  const hasPhone = String(inbound.phone || '').replace(/\\D/g, '').length >= 10;\n  const timeline = String(f.timeline || '').toLowerCase();\n  const soon = /immediate|asap|this week|15 day|1 month|one month|within a month|urgent|ready|2 week|two week/.test(timeline);\n  let budgetFit = false;\n  const max = f.budget_max ?? f.budget_min;\n  if (max != null) budgetFit = Number(max) >= cfg.property_price_inr * 0.8;\n  if (f.budget_min != null && Number(f.budget_min) > cfg.property_price_inr * 1.3) budgetFit = false;\n  if (hasPhone && budgetFit && soon) return 'hot';\n  if (hasPhone && (budgetFit || soon)) return 'warm';\n  if (hasPhone || max != null || f.name) return 'warm';\n  return 'cold';\n}\n\nfunction fallbackReply(f) {\n  const priceLakh = Math.round(cfg.property_price_inr / 100000);\n  if (!f.name) return `Hi! Thanks for your interest in the ${cfg.property_bhk} BHK in ${cfg.property_locality}. I'm assisting ${cfg.agent_name} from ${cfg.agent_company}. May I know your name?`;\n  if (f.budget_max == null) return `Nice to meet you, ${f.name}. This home is listed around ₹${priceLakh} Lakh. What's your budget range?`;\n  if (!f.timeline) return `Understood on budget. Are you looking to finalise in the next few weeks, or still exploring?`;\n  if (!f.purpose || f.purpose === 'unknown') return `Almost done — is this for your own stay or more of an investment?`;\n  if (!f.bhk) return `And are you specifically looking for a ${cfg.property_bhk} BHK, or open to other configurations?`;\n  return `Perfect, ${f.name}. I've noted your details for the ${cfg.property_locality} ${cfg.property_bhk} BHK. ${cfg.agent_name} will connect shortly.`;\n}\n\nlet extracted = {};\ntry {\n  const text = gemini.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  const cleaned = String(text).replace(/```json|```/g, '').trim();\n  if (cleaned.startsWith('{')) extracted = JSON.parse(cleaned);\n} catch (e) { extracted = {}; }\n\nconst lower = inbound.text.toLowerCase();\nlet name = extracted.name || prior.name || '';\nif (!name && /^[a-zA-Z][a-zA-Z\\s]{1,40}$/.test(inbound.text.trim())) name = inbound.text.trim();\n\nlet purpose = extracted.purpose || prior.purpose || 'unknown';\nif (/(self|own stay|end use|family|stay)/.test(lower)) purpose = 'self-use';\nif (/invest/.test(lower)) purpose = 'investment';\n\nlet timeline = extracted.timeline || prior.timeline || '';\nif (/(month|week|immediate|asap|urgent|year)/.test(lower) && !timeline) timeline = inbound.text.trim();\n\nlet bhk = extracted.bhk || prior.bhk || '';\nconst bhkMatch = lower.match(/(\\d)\\s*bhk/);\nif (bhkMatch) bhk = `${bhkMatch[1]}BHK`;\n\nconst fields = {\n  name: name || null,\n  budget_min: extracted.budget_min ?? prior.budget_min,\n  budget_max: extracted.budget_max ?? parseBudget(inbound.text) ?? prior.budget_max,\n  locality: extracted.locality || prior.locality || cfg.property_locality,\n  timeline: timeline || null,\n  purpose,\n  bhk: bhk || null,\n  notes: extracted.notes || prior.notes || null,\n};\n\nconst lead_score = score(fields);\nconst reply = (extracted.reply && String(extracted.reply).trim()) || fallbackReply(fields);\nconst transcript = [...(prior.transcript || []), { role: 'assistant', content: reply, at: new Date().toISOString() }];\nconst wasHot = prior.lead_score === 'hot' || prior.notified === 'yes';\nconst should_notify = lead_score === 'hot' && !wasHot;\n\nreturn [{ json: {\n  phone: inbound.phone,\n  wa_name: inbound.wa_name,\n  ...fields,\n  lead_score,\n  reply,\n  transcript: JSON.stringify(transcript),\n  notified: should_notify || prior.notified === 'yes' ? 'yes' : '',\n  should_notify,\n  status: 'open',\n  updated_at: new Date().toISOString(),\n  last_message: inbound.text,\n  agent_email: cfg.agent_email,\n  agent_name: cfg.agent_name,\n  property_title: cfg.property_title,\n  property_locality: cfg.property_locality,\n  phone_number_id: inbound.phone_number_id,\n}}];"
+      }
+    },
+    {
+      "id": "upsert",
+      "name": "Upsert lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1660, 240],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "PASTE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Leads", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone": "={{ $json.phone }}",
+            "wa_name": "={{ $json.wa_name }}",
+            "name": "={{ $json.name }}",
+            "budget_min": "={{ $json.budget_min }}",
+            "budget_max": "={{ $json.budget_max }}",
+            "locality": "={{ $json.locality }}",
+            "timeline": "={{ $json.timeline }}",
+            "purpose": "={{ $json.purpose }}",
+            "bhk": "={{ $json.bhk }}",
+            "lead_score": "={{ $json.lead_score }}",
+            "notes": "={{ $json.notes }}",
+            "transcript": "={{ $json.transcript }}",
+            "notified": "={{ $json.notified }}",
+            "status": "={{ $json.status }}",
+            "updated_at": "={{ $json.updated_at }}",
+            "last_message": "={{ $json.last_message }}"
+          },
+          "matchingColumns": ["phone"],
+          "schema": [
+            { "id": "phone", "displayName": "phone", "required": false, "defaultMatch": true, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "wa_name", "displayName": "wa_name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "name", "displayName": "name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "budget_min", "displayName": "budget_min", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "budget_max", "displayName": "budget_max", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "locality", "displayName": "locality", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "timeline", "displayName": "timeline", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "purpose", "displayName": "purpose", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "bhk", "displayName": "bhk", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "lead_score", "displayName": "lead_score", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "notes", "displayName": "notes", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "transcript", "displayName": "transcript", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "notified", "displayName": "notified", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "status", "displayName": "status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "updated_at", "displayName": "updated_at", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "last_message", "displayName": "last_message", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-wa",
+      "name": "Send WhatsApp HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 240],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/PASTE_PHONE_NUMBER_ID/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('Parse and score').item.json.phone }}\",\n  \"type\": \"text\",\n  \"text\": { \"body\": {{ JSON.stringify($('Parse and score').item.json.reply) }} }\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "if-hot",
+      "name": "If hot and new",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2140, 240],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-hot",
+              "leftValue": "={{ $('Parse and score').item.json.should_notify }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gmail",
+      "name": "Hot lead email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2380, 140],
+      "parameters": {
+        "sendTo": "={{ $('Client config').item.json.agent_email }}",
+        "subject": "=🔥 Hot lead: {{ $('Parse and score').item.json.name || 'New visitor' }} — {{ $('Client config').item.json.property_locality }}",
+        "emailType": "html",
+        "message": "=<p style=\"font-size:12px;color:#666\">LeadSpark</p><h2>Hot lead on {{ $('Client config').item.json.property_title }}</h2><p>Name: <b>{{ $('Parse and score').item.json.name }}</b><br/>Phone: <b>{{ $('Parse and score').item.json.phone }}</b><br/>Budget: {{ $('Parse and score').item.json.budget_max }}<br/>Timeline: {{ $('Parse and score').item.json.timeline }}<br/>Purpose: {{ $('Parse and score').item.json.purpose }}</p><p><a href=\"https://wa.me/{{ $('Parse and score').item.json.phone }}\">WhatsApp this lead</a></p>",
+        "options": {}
+      }
+    },
+    {
+      "id": "note-score",
+      "name": "About scoring",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1640, -120],
+      "parameters": {
+        "width": 300,
+        "height": 200,
+        "color": 5,
+        "content": "## Hot / warm / cold\n**Hot:** phone + budget fits (~80%) + timeline soon\n**Warm:** some intent/contact\n**Cold:** browsing\n\nEmail once when score becomes hot."
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Verify (GET)": {
+      "main": [[{ "node": "Check verify token", "type": "main", "index": 0 }]]
+    },
+    "Check verify token": {
+      "main": [
+        [{ "node": "Respond challenge", "type": "main", "index": 0 }],
+        [{ "node": "Respond forbidden", "type": "main", "index": 0 }]
+      ]
+    },
+    "WhatsApp Webhook": {
+      "main": [[{ "node": "Extract inbound", "type": "main", "index": 0 }]]
+    },
+    "Extract inbound": {
+      "main": [[{ "node": "Client config", "type": "main", "index": 0 }]]
+    },
+    "Client config": {
+      "main": [[{ "node": "Get lead row", "type": "main", "index": 0 }]]
+    },
+    "Get lead row": {
+      "main": [[{ "node": "Prepare Gemini payload", "type": "main", "index": 0 }]]
+    },
+    "Prepare Gemini payload": {
+      "main": [[{ "node": "Call Gemini", "type": "main", "index": 0 }]]
+    },
+    "Call Gemini": {
+      "main": [[{ "node": "Parse and score", "type": "main", "index": 0 }]]
+    },
+    "Parse and score": {
+      "main": [[{ "node": "Upsert lead", "type": "main", "index": 0 }]]
+    },
+    "Upsert lead": {
+      "main": [[{ "node": "Send WhatsApp HTTP", "type": "main", "index": 0 }]]
+    },
+    "Send WhatsApp HTTP": {
+      "main": [[{ "node": "If hot and new", "type": "main", "index": 0 }]]
+    },
+    "If hot and new": {
+      "main": [
+        [{ "node": "Hot lead email", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}
