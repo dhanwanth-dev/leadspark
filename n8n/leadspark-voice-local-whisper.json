@@ -1,0 +1,86 @@
+{
+  "name": "LeadSpark — Voice → Whisper (local)",
+  "meta": {
+    "description": "Phone records audio → local Whisper (Docker) → transcript JSON back. No Gemini, no cloud n8n. Import into self-hosted n8n on leadspark-net."
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "note-start",
+      "name": "START HERE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-520, -80],
+      "parameters": {
+        "width": 420,
+        "height": 360,
+        "color": 4,
+        "content": "## Local voice test (free)\n\n**Prereqs (Docker Desktop running):**\n- `leadspark-whisper` on port 9000\n- `leadspark-n8n` on port 5678\n- Both on network `leadspark-net`\n\n**Before activate:**\n1. Open **Transcribe with Whisper** node\n2. Replace `PASTE_WHISPER_API_KEY` with output of:\n   `docker exec leadspark-whisper whisper_manage --showkey`\n3. **Activate** workflow\n4. Copy **Voice Webhook** Production URL\n5. Paste into `voice-recorder.html` on phone\n\nWebhook example:\n`http://192.168.1.13:5678/webhook/leadspark-voice-local`"
+      }
+    },
+    {
+      "id": "webhook",
+      "name": "Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 120],
+      "webhookId": "leadspark-voice-local",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leadspark-voice-local",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "transcribe",
+      "name": "Transcribe with Whisper",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [60, 120],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body ?? raw;\n\nconst audioBase64 = body.audioBase64 || body.audio_base64;\nconst mimeType = body.mimeType || body.mime_type || 'audio/webm';\nconst duration_sec = body.duration_sec ?? body.durationSec ?? null;\nconst source = body.source || 'mobile-voice-recorder';\n\nif (!audioBase64 || typeof audioBase64 !== 'string') {\n  throw new Error('Missing audioBase64. Use voice-recorder.html or POST { audioBase64, mimeType }');\n}\n\n// Get key once: docker exec leadspark-whisper whisper_manage --showkey\nconst WHISPER_API_KEY = 'PASTE_WHISPER_API_KEY';\nif (!WHISPER_API_KEY || WHISPER_API_KEY === 'PASTE_WHISPER_API_KEY') {\n  throw new Error('Set WHISPER_API_KEY in this Code node (docker exec leadspark-whisper whisper_manage --showkey)');\n}\n\nconst whisperUrl = 'http://leadspark-whisper:9000/v1/audio/transcriptions';\nconst buf = Buffer.from(audioBase64, 'base64');\n\nlet ext = 'webm';\nif (String(mimeType).includes('mp4')) ext = 'mp4';\nif (String(mimeType).includes('wav')) ext = 'wav';\nif (String(mimeType).includes('mpeg')) ext = 'mp3';\n\nconst form = new FormData();\nform.append('file', new Blob([buf], { type: mimeType }), `audio.${ext}`);\nform.append('model', 'whisper-1');\n\nconst res = await fetch(whisperUrl, {\n  method: 'POST',\n  headers: {\n    Authorization: `Bearer ${WHISPER_API_KEY}`,\n  },\n  body: form,\n});\n\nif (!res.ok) {\n  const errText = await res.text();\n  throw new Error(`Whisper failed (${res.status}): ${errText}`);\n}\n\nconst data = await res.json();\nconst transcript = String(data.text || '').trim();\n\nreturn [{\n  json: {\n    ok: true,\n    sheet_saved: false,\n    transcript,\n    summary: transcript ? `Call recorded (${duration_sec ?? '?'} sec). Transcript ready.` : '',\n    language_detected: data.language || 'auto',\n    duration_sec,\n    source,\n    fields: {\n      name: null,\n      phone: null,\n      budget_min: null,\n      budget_max: null,\n      locality: null,\n      timeline: null,\n      purpose: null,\n      bhk: null,\n      lead_score: 'cold',\n      notes: 'Local Whisper transcription only (no AI summary yet)',\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "respond",
+      "name": "Respond to phone",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [320, 120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Voice Webhook": {
+      "main": [
+        [
+          {
+            "node": "Transcribe with Whisper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe with Whisper": {
+      "main": [
+        [
+          {
+            "node": "Respond to phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
