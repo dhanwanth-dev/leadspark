@@ -1,0 +1,164 @@
+{
+  "name": "LeadSpark — Voice call → Sheet",
+  "meta": {
+    "description": "Mobile records audio → POST base64 JSON → Gemini transcribe+summarize+extract → Google Sheet. Pair with n8n/voice-recorder.html on your phone."
+  },
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "id": "note",
+      "name": "START HERE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-520, -120],
+      "parameters": {
+        "width": 400,
+        "height": 380,
+        "color": 4,
+        "content": "## LeadSpark Voice (n8n only)\n\n1. Create Google Sheet tab **CallLeads** from `voice-calls-sheet-template.csv`\n2. Credentials: Gemini Header Auth + Google Sheets\n3. Paste Sheet ID on **Save to Sheet**\n4. **Activate** workflow\n5. Copy **Voice Webhook** Production URL into `voice-recorder.html` on your phone\n6. Record 30–90 sec mock call (Tamil/Tanglish OK)\n\nWebhook URL ends with `/webhook/leadspark-voice`"
+      }
+    },
+    {
+      "id": "webhook",
+      "name": "Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 80],
+      "webhookId": "leadspark-voice",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leadspark-voice",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "prepare",
+      "name": "Prepare audio for Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, 80],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body ?? raw;\n\nconst audioBase64 = body.audioBase64 || body.audio_base64;\nconst mimeType = body.mimeType || body.mime_type || 'audio/webm';\nconst duration_sec = body.duration_sec ?? body.durationSec ?? null;\nconst source = body.source || 'n8n-voice';\n\nif (!audioBase64 || typeof audioBase64 !== 'string') {\n  throw new Error('Missing audioBase64 in JSON body. Use voice-recorder.html or POST { audioBase64, mimeType }');\n}\n\nconst prompt = `You are LeadSpark — a real estate call assistant for Indian brokers.\n\nListen to this phone conversation. It may be Tamil, Tanglish, Hindi, or English.\n\n1. Transcribe accurately (Tamil in Tamil script or romanized).\n2. Write a 2-3 sentence English summary for the broker.\n3. Extract lead fields.\n\nReturn ONLY JSON:\n{\n  \"transcript\": \"...\",\n  \"summary\": \"...\",\n  \"language_detected\": \"tamil|tanglish|hindi|english|mixed\",\n  \"fields\": {\n    \"name\": null,\n    \"phone\": null,\n    \"budget_min\": null,\n    \"budget_max\": null,\n    \"locality\": null,\n    \"timeline\": null,\n    \"purpose\": null,\n    \"bhk\": null,\n    \"lead_score\": \"hot|warm|cold\",\n    \"notes\": null\n  }\n}\n\nhot = phone + budget + soon timeline; warm = some intent; cold = vague.`;\n\nreturn [{\n  json: {\n    audioBase64,\n    mimeType,\n    duration_sec,\n    source,\n    created_at: new Date().toISOString(),\n    gemini_body: {\n      contents: [{\n        parts: [\n          { text: prompt },\n          { inline_data: { mime_type: mimeType, data: audioBase64 } },\n        ],\n      }],\n      generationConfig: {\n        temperature: 0.2,\n        responseMimeType: 'application/json',\n      },\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "gemini",
+      "name": "Call Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 80],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.gemini_body }}",
+        "options": { "timeout": 120000 }
+      }
+    },
+    {
+      "id": "parse",
+      "name": "Parse transcript + lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 80],
+      "parameters": {
+        "jsCode": "const prep = $('Prepare audio for Gemini').first().json;\nconst gemini = $input.first().json;\n\nlet parsed = {};\ntry {\n  const text = gemini.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  const cleaned = String(text).replace(/```json|```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('Gemini did not return valid JSON. Check GEMINI_API_KEY and audio length.');\n}\n\nconst f = parsed.fields || {};\n\nreturn [{\n  json: {\n    created_at: prep.created_at,\n    duration_sec: prep.duration_sec,\n    language_detected: parsed.language_detected || 'unknown',\n    transcript: parsed.transcript || '',\n    summary: parsed.summary || '',\n    name: f.name ?? null,\n    phone: f.phone ?? null,\n    budget_min: f.budget_min ?? null,\n    budget_max: f.budget_max ?? null,\n    locality: f.locality ?? null,\n    timeline: f.timeline ?? null,\n    purpose: f.purpose ?? null,\n    bhk: f.bhk ?? null,\n    lead_score: f.lead_score || 'cold',\n    notes: f.notes ?? null,\n    source: prep.source,\n  },\n}];"
+      }
+    },
+    {
+      "id": "sheet",
+      "name": "Save to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [760, 80],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "PASTE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "CallLeads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "created_at": "={{ $json.created_at }}",
+            "duration_sec": "={{ $json.duration_sec }}",
+            "language_detected": "={{ $json.language_detected }}",
+            "transcript": "={{ $json.transcript }}",
+            "summary": "={{ $json.summary }}",
+            "name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "budget_min": "={{ $json.budget_min }}",
+            "budget_max": "={{ $json.budget_max }}",
+            "locality": "={{ $json.locality }}",
+            "timeline": "={{ $json.timeline }}",
+            "purpose": "={{ $json.purpose }}",
+            "bhk": "={{ $json.bhk }}",
+            "lead_score": "={{ $json.lead_score }}",
+            "notes": "={{ $json.notes }}",
+            "source": "={{ $json.source }}"
+          },
+          "schema": [
+            { "id": "created_at", "displayName": "created_at", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "duration_sec", "displayName": "duration_sec", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "language_detected", "displayName": "language_detected", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "transcript", "displayName": "transcript", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "summary", "displayName": "summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "name", "displayName": "name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "phone", "displayName": "phone", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "budget_min", "displayName": "budget_min", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "budget_max", "displayName": "budget_max", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "locality", "displayName": "locality", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "timeline", "displayName": "timeline", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "purpose", "displayName": "purpose", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "bhk", "displayName": "bhk", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "lead_score", "displayName": "lead_score", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "notes", "displayName": "notes", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "source", "displayName": "source", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "respond",
+      "name": "Respond to phone",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1000, 80],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, sheet_saved: true, transcript: $('Parse transcript + lead').item.json.transcript, summary: $('Parse transcript + lead').item.json.summary, language_detected: $('Parse transcript + lead').item.json.language_detected, fields: { name: $('Parse transcript + lead').item.json.name, phone: $('Parse transcript + lead').item.json.phone, budget_min: $('Parse transcript + lead').item.json.budget_min, budget_max: $('Parse transcript + lead').item.json.budget_max, locality: $('Parse transcript + lead').item.json.locality, timeline: $('Parse transcript + lead').item.json.timeline, purpose: $('Parse transcript + lead').item.json.purpose, bhk: $('Parse transcript + lead').item.json.bhk, lead_score: $('Parse transcript + lead').item.json.lead_score, notes: $('Parse transcript + lead').item.json.notes } }) }}",
+        "options": { "responseCode": 200 }
+      }
+    }
+  ],
+  "connections": {
+    "Voice Webhook": {
+      "main": [[{ "node": "Prepare audio for Gemini", "type": "main", "index": 0 }]]
+    },
+    "Prepare audio for Gemini": {
+      "main": [[{ "node": "Call Gemini", "type": "main", "index": 0 }]]
+    },
+    "Call Gemini": {
+      "main": [[{ "node": "Parse transcript + lead", "type": "main", "index": 0 }]]
+    },
+    "Parse transcript + lead": {
+      "main": [[{ "node": "Save to Sheet", "type": "main", "index": 0 }]]
+    },
+    "Save to Sheet": {
+      "main": [[{ "node": "Respond to phone", "type": "main", "index": 0 }]]
+    }
+  }
+}
