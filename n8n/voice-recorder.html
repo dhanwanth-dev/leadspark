@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>LeadSpark Voice Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #0f1f1c; color: #fff; max-width: 480px; margin-inline: auto; }
+    h1 { font-size: 1.25rem; margin: 0 0 4px; }
+    .sub { color: #8fd6c4; font-size: 0.75rem; margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: #aaa; margin-bottom: 4px; }
+    input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #1a2e29; color: #fff; margin-bottom: 12px; font-size: 0.85rem; }
+    .timer { font-size: 2.5rem; font-family: monospace; text-align: center; margin: 16px 0; }
+    .hint { text-align: center; color: #888; font-size: 0.85rem; min-height: 2.5em; }
+    button { width: 100%; padding: 16px; border: none; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+    #recordBtn { background: #e53935; color: #fff; }
+    #stopBtn { background: #fff; color: #0f1f1c; display: none; }
+    #result { margin-top: 16px; font-size: 0.85rem; }
+    .card { background: #1a2e29; border: 1px solid #2a4038; border-radius: 12px; padding: 12px; margin-top: 8px; white-space: pre-wrap; }
+    .err { color: #f88; }
+    .ok { color: #8fd6c4; }
+  </style>
+</head>
+<body>
+  <p class="sub">LeadSpark</p>
+  <h1>Voice call recorder</h1>
+  <p style="color:#aaa;font-size:0.9rem">Record a mock broker call (Tamil/Tanglish OK). Sends audio to your n8n workflow → Gemini → Google Sheet.</p>
+
+  <label>n8n Webhook URL (Production)</label>
+  <input id="webhookUrl" type="url" placeholder="https://your-instance.app.n8n.cloud/webhook/leadspark-voice" />
+
+  <div class="timer" id="timer">00:00</div>
+  <p class="hint" id="hint">Paste webhook URL, then tap Record.</p>
+
+  <button type="button" id="recordBtn">● Record call</button>
+  <button type="button" id="stopBtn">■ Stop & send to n8n</button>
+
+  <div id="result"></div>
+
+  <script>
+    const webhookInput = document.getElementById('webhookUrl');
+    const recordBtn = document.getElementById('recordBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const timerEl = document.getElementById('timer');
+    const hintEl = document.getElementById('hint');
+    const resultEl = document.getElementById('result');
+
+    const saved = localStorage.getItem('leadspark_voice_webhook');
+    if (saved) webhookInput.value = saved;
+
+    let recorder, chunks = [], sec = 0, interval;
+
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    recordBtn.onclick = async () => {
+      const url = webhookInput.value.trim();
+      if (!url) { hintEl.textContent = 'Paste your n8n Production webhook URL first.'; return; }
+      localStorage.setItem('leadspark_voice_webhook', url);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
+        chunks = [];
+        recorder = new MediaRecorder(stream, { mimeType: mime });
+        recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+        recorder.onstop = () => upload(url, mime.split(';')[0]);
+        recorder.start(1000);
+        sec = 0;
+        timerEl.textContent = '00:00';
+        interval = setInterval(() => { sec++; timerEl.textContent = pad(Math.floor(sec/60)) + ':' + pad(sec%60); }, 1000);
+        recordBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+        hintEl.textContent = 'Recording… talk like a real buyer enquiry.';
+        resultEl.innerHTML = '';
+      } catch (e) {
+        hintEl.textContent = 'Allow microphone access in browser settings.';
+      }
+    };
+
+    stopBtn.onclick = () => {
+      clearInterval(interval);
+      recorder?.stop();
+      recorder?.stream.getTracks().forEach(t => t.stop());
+      recordBtn.style.display = 'block';
+      stopBtn.style.display = 'none';
+      hintEl.textContent = 'Sending to n8n…';
+    };
+
+    async function upload(webhookUrl, mimeType) {
+      try {
+        const blob = new Blob(chunks, { type: mimeType });
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        const audioBase64 = btoa(binary);
+
+        const res = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            audioBase64,
+            mimeType,
+            duration_sec: sec,
+            source: 'mobile-voice-recorder',
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+
+        hintEl.textContent = data.sheet_saved ? 'Done — check Google Sheet.' : 'Processed.';
+        resultEl.innerHTML =
+          '<p class="ok">Saved to sheet</p>' +
+          '<div class="card"><b>Summary</b>\n' + (data.summary || '') + '</div>' +
+          '<div class="card"><b>Transcript</b>\n' + (data.transcript || '') + '</div>' +
+          '<div class="card"><b>Lead</b>\n' + JSON.stringify(data.fields || {}, null, 2) + '</div>';
+      } catch (e) {
+        hintEl.textContent = 'Failed — see error below.';
+        resultEl.innerHTML = '<p class="err">' + (e.message || e) + '</p>';
+      }
+    }
+  </script>
+</body>
+</html>
