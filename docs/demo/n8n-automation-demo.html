@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeadSpark — n8n Automation Demo</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    :root {
+      --bg: #0b1412;
+      --panel: #12201c;
+      --line: #1e3a32;
+      --mint: #3ecf8e;
+      --mint-dim: #1a4d3a;
+      --wa: #25d366;
+      --text: #e8f5f0;
+      --muted: #8aa89c;
+      --hot: #ff6b4a;
+      --warm: #f0b429;
+      --node: #1a2e28;
+      --active: #2d5a4a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: radial-gradient(ellipse at 20% 0%, #143028 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    .frame {
+      width: 1280px;
+      height: 720px;
+      margin: 0 auto;
+      padding: 36px 48px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .brand { display: flex; flex-direction: column; gap: 4px; }
+    .brand .by { font-size: 13px; color: var(--mint); letter-spacing: 0.04em; }
+    .brand h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand p { font-size: 15px; color: var(--muted); max-width: 520px; }
+    .badge {
+      background: var(--mint-dim);
+      color: var(--mint);
+      border: 1px solid #2a6b52;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .stage {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 28px;
+      min-height: 0;
+    }
+    .canvas {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .canvas h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 22px;
+    }
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 10px;
+      align-items: center;
+    }
+    .node {
+      background: var(--node);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      min-width: 148px;
+      transition: all 0.35s ease;
+      opacity: 0.45;
+    }
+    .node.on {
+      opacity: 1;
+      border-color: var(--mint);
+      background: var(--active);
+      box-shadow: 0 0 0 1px rgba(62, 207, 142, 0.35), 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .node .label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .node .title { font-size: 14px; font-weight: 600; }
+    .arrow {
+      color: var(--muted);
+      font-size: 18px;
+      opacity: 0.35;
+      transition: opacity 0.3s;
+    }
+    .arrow.on { opacity: 1; color: var(--mint); }
+    .side {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px 20px;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+      flex: 1;
+    }
+    .bubble {
+      max-width: 92%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      line-height: 1.4;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: all 0.4s ease;
+    }
+    .bubble.show { opacity: 1; transform: none; }
+    .bubble.buyer {
+      align-self: flex-end;
+      background: var(--wa);
+      color: #0b1412;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble.bot {
+      align-self: flex-start;
+      background: #1a2e28;
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 4px;
+    }
+    .sheet {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: 8px;
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+    .row.show { opacity: 1; }
+    .row .k { color: var(--muted); }
+    .row .v { color: var(--text); }
+    .score {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      background: rgba(255,107,74,0.2);
+      color: var(--hot);
+    }
+    .email {
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--muted);
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+    .email.show { opacity: 1; color: var(--text); }
+    .email strong { color: var(--hot); }
+    footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .progress {
+      height: 4px;
+      width: 280px;
+      background: var(--line);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .progress > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--mint), #7ee0b8);
+      transition: width 0.4s ease;
+    }
+    .status-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--mint);
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <header>
+      <div class="brand">
+        <span class="by">LeadSpark</span>
+        <h1>WhatsApp → Qualify → Sheet → Hot Alert</h1>
+        <p>End-to-end n8n automation: inbound enquiry becomes a scored lead in under a minute.</p>
+      </div>
+      <div class="badge" id="badge">EXECUTION · IDLE</div>
+    </header>
+
+    <div class="stage">
+      <section class="canvas">
+        <h2>n8n workflow · leadspark-whatsapp-qualify</h2>
+        <div class="flow" id="flow">
+          <div class="node" data-i="0"><div class="label">01</div><div class="title">WhatsApp Trigger</div></div>
+          <div class="arrow" data-a="0">→</div>
+          <div class="node" data-i="1"><div class="label">02</div><div class="title">Extract inbound</div></div>
+          <div class="arrow" data-a="1">→</div>
+          <div class="node" data-i="2"><div class="label">03</div><div class="title">Client config</div></div>
+          <div class="arrow" data-a="2">→</div>
+          <div class="node" data-i="3"><div class="label">04</div><div class="title">Gemini qualify</div></div>
+          <div class="arrow" data-a="3">→</div>
+          <div class="node" data-i="4"><div class="label">05</div><div class="title">Send WhatsApp</div></div>
+          <div class="arrow" data-a="4">→</div>
+          <div class="node" data-i="5"><div class="label">06</div><div class="title">Google Sheets</div></div>
+          <div class="arrow" data-a="5">→</div>
+          <div class="node" data-i="6"><div class="label">07</div><div class="title">Hot email</div></div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="panel">
+          <h3>Buyer WhatsApp</h3>
+          <div class="chat" id="chat"></div>
+        </div>
+        <div class="panel">
+          <h3>Lead CRM (Google Sheet)</h3>
+          <div class="sheet" id="sheet">
+            <div class="row" data-f="name"><span class="k">name</span><span class="v">—</span></div>
+            <div class="row" data-f="phone"><span class="k">phone</span><span class="v">—</span></div>
+            <div class="row" data-f="budget"><span class="k">budget</span><span class="v">—</span></div>
+            <div class="row" data-f="timeline"><span class="k">timeline</span><span class="v">—</span></div>
+            <div class="row" data-f="score"><span class="k">score</span><span class="v">—</span></div>
+          </div>
+        </div>
+        <div class="panel" style="flex:0.7">
+          <h3>Agent inbox</h3>
+          <div class="email" id="email">Waiting for hot lead…</div>
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      <span class="status-pill" id="status">Ready</span>
+      <div class="progress"><i id="bar"></i></div>
+      <span>docs/demo · LeadSpark</span>
+    </footer>
+  </div>
+
+  <script>
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const chat = document.getElementById('chat');
+    const badge = document.getElementById('badge');
+    const status = document.getElementById('status');
+    const bar = document.getElementById('bar');
+
+    function setProgress(p) { bar.style.width = p + '%'; }
+    function setActive(n) {
+      document.querySelectorAll('.node').forEach((el) => {
+        el.classList.toggle('on', Number(el.dataset.i) <= n);
+      });
+      document.querySelectorAll('.arrow').forEach((el) => {
+        el.classList.toggle('on', Number(el.dataset.a) < n);
+      });
+    }
+    function addBubble(who, text) {
+      const el = document.createElement('div');
+      el.className = 'bubble ' + who;
+      el.textContent = text;
+      chat.appendChild(el);
+      requestAnimationFrame(() => el.classList.add('show'));
+    }
+    function setField(key, value, html) {
+      const row = document.querySelector('[data-f="' + key + '"]');
+      const v = row.querySelector('.v');
+      if (html) v.innerHTML = value; else v.textContent = value;
+      row.classList.add('show');
+    }
+
+    async function run() {
+      badge.textContent = 'EXECUTION · RUNNING';
+      status.textContent = 'Inbound WhatsApp message';
+      setProgress(5);
+      setActive(0);
+      await sleep(700);
+      addBubble('buyer', 'Hi, is the Whitefield 3BHK still available?');
+      await sleep(900);
+
+      setActive(1);
+      status.textContent = 'Extract phone + message text';
+      setProgress(18);
+      await sleep(700);
+
+      setActive(2);
+      status.textContent = 'Load client config (Sharma Properties)';
+      setProgress(28);
+      await sleep(700);
+
+      setActive(3);
+      status.textContent = 'Gemini qualifies & drafts reply';
+      setProgress(42);
+      await sleep(900);
+      addBubble('bot', 'Hi! Yes — 3 BHK in Whitefield, ₹1.25 Cr. May I have your name?');
+      await sleep(1000);
+      addBubble('buyer', 'Ravi');
+      await sleep(700);
+      addBubble('bot', 'Thanks Ravi. What’s your budget range?');
+      await sleep(800);
+      addBubble('buyer', 'Around 1.2 Cr, looking within a month');
+      await sleep(900);
+
+      setActive(4);
+      status.textContent = 'Send WhatsApp reply via Cloud API';
+      setProgress(58);
+      await sleep(700);
+      addBubble('bot', 'Got it — own stay / investment? And preferred BHK?');
+      await sleep(800);
+      addBubble('buyer', 'Own stay, 3 BHK');
+      await sleep(900);
+
+      setActive(5);
+      status.textContent = 'Upsert lead row in Google Sheets';
+      setProgress(75);
+      setField('name', 'Ravi');
+      await sleep(350);
+      setField('phone', '9198XXXX210');
+      await sleep(350);
+      setField('budget', '1.2 Cr');
+      await sleep(350);
+      setField('timeline', 'Within 1 month');
+      await sleep(350);
+      setField('score', '<span class="score">HOT</span>', true);
+      await sleep(800);
+
+      setActive(6);
+      status.textContent = 'Hot lead email → agent Gmail';
+      setProgress(92);
+      const email = document.getElementById('email');
+      email.innerHTML = '<strong>🔥 Hot lead: Ravi</strong><br/>Whitefield 3BHK · 1.2 Cr · within 1 month<br/>WhatsApp handoff ready for Rahul Sharma';
+      email.classList.add('show');
+      await sleep(1200);
+
+      badge.textContent = 'EXECUTION · SUCCESS';
+      status.textContent = 'Done — lead scored hot & agent notified';
+      setProgress(100);
+    }
+
+    // Auto-start for screen recording; loop once after pause
+    (async () => {
+      await sleep(800);
+      await run();
+      await sleep(2500);
+      // freeze on success for README screenshot / end card
+    })();
+  </script>
+</body>
+</html>
