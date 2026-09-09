@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#143028"/>
+      <stop offset="100%" style="stop-color:#0b1412"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <text x="64" y="120" fill="#3ecf8e" font-family="system-ui,sans-serif" font-size="22">LeadSpark</text>
+  <text x="64" y="200" fill="#e8f5f0" font-family="system-ui,sans-serif" font-size="48" font-weight="700">n8n WhatsApp qualify demo</text>
+  <text x="64" y="260" fill="#8aa89c" font-family="system-ui,sans-serif" font-size="24">Inbound chat → Gemini → Google Sheets → hot agent email</text>
+  <rect x="64" y="340" width="220" height="56" rx="10" fill="#25d366"/>
+  <text x="96" y="376" fill="#0b1412" font-family="system-ui,sans-serif" font-size="20" font-weight="600">Watch demo.mp4</text>
+</svg>
